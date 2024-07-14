@@ -1,6 +1,10 @@
-import { Component, input } from '@angular/core';
+import { Component, input, inject } from '@angular/core';
+import { WINDOW } from '../../shared/utils/injection-tokens';
 import { Gif } from '../../shared/interfaces';
-import { GifPlayerComponent } from './gi-player.component';
+import { MatToolbarModule } from '@angular/material/toolbar';
+import { MatIconModule } from '@angular/material/icon';
+import { MatButtonModule } from '@angular/material/button';
+import { GifPlayerComponent } from './gif-player.component';
 
 @Component({
   standalone: true,
@@ -11,11 +15,29 @@ import { GifPlayerComponent } from './gi-player.component';
       <app-gif-player
         [src]="gif.src"
         [thumbnail]="gif.thumbnail"
+        data-testid="gif-list-item"
       ></app-gif-player>
+      <mat-toolbar color="primary">
+        <span>{{ gif.title }}</span>
+        <span class="toolbar-spacer"></span>
+        <button
+          mat-icon-button
+          (click)="window.open('https://reddit.com/' + gif.permalink)"
+        >
+          <mat-icon>comment</mat-icon>
+        </button>
+      </mat-toolbar>
     </div>
+    } @empty {
+    <p>Can't find any gifs 🤷</p>
     }
   `,
-  imports: [GifPlayerComponent],
+  imports: [
+    GifPlayerComponent,
+    MatToolbarModule,
+    MatIconModule,
+    MatButtonModule,
+  ],
   styles: [
     `
       div {
@@ -38,4 +60,5 @@ import { GifPlayerComponent } from './gi-player.component';
 })
 export class GifListComponent {
   gifs = input.required<Gif[]>();
+  window = inject(WINDOW);
 }

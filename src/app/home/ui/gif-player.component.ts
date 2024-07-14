@@ -1,15 +1,15 @@
 import {
   Component,
   ElementRef,
-  input,
-  viewChild,
   computed,
-  signal,
   effect,
+  input,
+  signal,
+  viewChild,
 } from '@angular/core';
-import { fromEvent, Subject, switchMap } from 'rxjs';
 import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
+import { Subject, fromEvent, switchMap } from 'rxjs';
 
 interface GifPlayerState {
   playing: boolean;
@@ -20,7 +20,7 @@ interface GifPlayerState {
   standalone: true,
   selector: 'app-gif-player',
   template: `
-    @if (status() === 'loading'){
+    @if (status() === 'loading') {
     <mat-progress-spinner mode="indeterminate" diameter="50" />
     }
     <div
@@ -42,7 +42,6 @@ interface GifPlayerState {
       ></video>
     </div>
   `,
-  imports: [MatProgressSpinnerModule],
   styles: [
     `
       :host {
@@ -78,6 +77,7 @@ interface GifPlayerState {
       }
     `,
   ],
+  imports: [MatProgressSpinnerModule],
 })
 export class GifPlayerComponent {
   src = input.required<string>();
@@ -98,6 +98,9 @@ export class GifPlayerComponent {
   // sources
   togglePlay$ = new Subject<void>();
 
+  // note: unfortunately, we need to check if a play has been triggered here as
+  // subscribing to the 'loadstart' event will actually trigger a load, which we
+  // don't want unless it is supposed to be playing
   videoLoadStart$ = this.togglePlay$.pipe(
     switchMap(() => this.videoElement$),
     switchMap(({ nativeElement }) => fromEvent(nativeElement, 'loadstart'))
@@ -107,7 +110,7 @@ export class GifPlayerComponent {
     switchMap(({ nativeElement }) => fromEvent(nativeElement, 'loadeddata'))
   );
 
-  onstructor() {
+  constructor() {
     //reducers
     this.videoLoadStart$
       .pipe(takeUntilDestroyed())
@@ -127,6 +130,7 @@ export class GifPlayerComponent {
         this.state.update((state) => ({ ...state, playing: !state.playing }))
       );
 
+    // effects
     effect(() => {
       const { nativeElement: video } = this.videoElement();
       const playing = this.playing();
