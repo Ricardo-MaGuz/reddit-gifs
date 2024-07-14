@@ -1,15 +1,26 @@
+import { CommonModule } from '@angular/common';
 import {
   Component,
   ElementRef,
+  Input,
+  ViewChild,
   computed,
   effect,
-  input,
   signal,
-  viewChild,
 } from '@angular/core';
 import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
-import { Subject, fromEvent, switchMap } from 'rxjs';
+import { connect } from 'ngxtension/connect';
+import {
+  EMPTY,
+  Subject,
+  combineLatest,
+  filter,
+  fromEvent,
+  map,
+  merge,
+  switchMap,
+} from 'rxjs';
 
 interface GifPlayerState {
   playing: boolean;
@@ -20,16 +31,21 @@ interface GifPlayerState {
   standalone: true,
   selector: 'app-gif-player',
   template: `
-    @if (status() === 'loading') {
+    @if (status() === 'loading'){
     <mat-progress-spinner mode="indeterminate" diameter="50" />
     }
     <div
-      class="preload-background"
-      [style.background]="'url(' + thumbnail() + ') 50% 50% / cover no-repeat'"
-      [class.blur]="
+      [style.background]="'url(' + thumbnail + ') 50% 50% / cover no-repeat'"
+      [ngStyle]="
         status() !== 'loaded' &&
-        !['/assets/nsfw.png', '/assets/default.png'].includes(thumbnail())
+        !['/assets/nsfw.png', '/assets/default.png'].includes(thumbnail)
+          ? {
+              filter: 'blur(10px) brightness(0.6)',
+              transform: 'scale(1.1)'
+            }
+          : {}
       "
+      class="preload-background"
     >
       <video
         (click)="togglePlay$.next()"
@@ -38,7 +54,7 @@ interface GifPlayerState {
         preload="none"
         [loop]="true"
         [muted]="true"
-        [src]="src()"
+        [src]="src"
       ></video>
     </div>
   `,
@@ -54,11 +70,6 @@ interface GifPlayerState {
       .preload-background {
         width: 100%;
         height: auto;
-      }
-
-      .blur {
-        filter: blur(10px) brightness(0.6);
-        transform: scale(1.1);
       }
 
       video {
@@ -77,14 +88,21 @@ interface GifPlayerState {
       }
     `,
   ],
-  imports: [MatProgressSpinnerModule],
+  imports: [CommonModule, MatProgressSpinnerModule],
 })
 export class GifPlayerComponent {
-  src = input.required<string>();
-  thumbnail = input.required<string>();
+  @Input({ required: true }) src!: string;
+  @Input({ required: true }) thumbnail!: string;
 
-  videoElement = viewChild.required<ElementRef<HTMLVideoElement>>('gifPlayer');
-  videoElement$ = toObservable(this.videoElement);
+  // Fake new signals API
+  videoElement = signal<HTMLVideoElement | undefined>(undefined);
+  @ViewChild('gifPlayer') set video(element: ElementRef<HTMLVideoElement>) {
+    this.videoElement.set(element.nativeElement);
+  }
+
+  videoElement$ = toObservable(this.videoElement).pipe(
+    filter((element): element is HTMLVideoElement => !!element)
+  );
 
   state = signal<GifPlayerState>({
     playing: false,
@@ -98,41 +116,36 @@ export class GifPlayerComponent {
   // sources
   togglePlay$ = new Subject<void>();
 
-  // note: unfortunately, we need to check if a play has been triggered here as
-  // subscribing to the 'loadstart' event will actually trigger a load, which we
-  // don't want unless it is supposed to be playing
-  videoLoadStart$ = this.togglePlay$.pipe(
-    switchMap(() => this.videoElement$),
-    switchMap(({ nativeElement }) => fromEvent(nativeElement, 'loadstart'))
+  // note: unfortunately, checking "playing" is required here as subscribing to the
+  // 'loadstart' event will actually trigger a load, which we don't want unless it
+  // is supposed to be playing
+  videoLoadStart$ = combineLatest([
+    this.videoElement$,
+    toObservable(this.playing),
+  ]).pipe(
+    switchMap(([element, playing]) =>
+      playing ? fromEvent(element, 'loadstart') : EMPTY
+    )
   );
 
   videoLoadComplete$ = this.videoElement$.pipe(
-    switchMap(({ nativeElement }) => fromEvent(nativeElement, 'loadeddata'))
+    switchMap((element) => fromEvent(element, 'loadeddata'))
   );
 
   constructor() {
     //reducers
-    this.videoLoadStart$
-      .pipe(takeUntilDestroyed())
-      .subscribe(() =>
-        this.state.update((state) => ({ ...state, status: 'loading' }))
-      );
+    const nextState$ = merge(
+      this.videoLoadStart$.pipe(map(() => ({ status: 'loading' as const }))),
+      this.videoLoadComplete$.pipe(map(() => ({ status: 'loaded' as const })))
+    );
 
-    this.videoLoadComplete$
-      .pipe(takeUntilDestroyed())
-      .subscribe(() =>
-        this.state.update((state) => ({ ...state, status: 'loaded' }))
-      );
-
-    this.togglePlay$
-      .pipe(takeUntilDestroyed())
-      .subscribe(() =>
-        this.state.update((state) => ({ ...state, playing: !state.playing }))
-      );
+    connect(this.state)
+      .with(nextState$)
+      .with(this.togglePlay$, (state) => ({ playing: !state.playing }));
 
     // effects
     effect(() => {
-      const { nativeElement: video } = this.videoElement();
+      const video = this.videoElement();
       const playing = this.playing();
       const status = this.status();
 

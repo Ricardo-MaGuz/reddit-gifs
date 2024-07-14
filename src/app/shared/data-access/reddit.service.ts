@@ -3,18 +3,18 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Gif, RedditPost, RedditResponse } from '../interfaces';
 import { FormControl } from '@angular/forms';
+import { EMPTY, Subject, merge } from 'rxjs';
 import {
-  EMPTY,
-  Subject,
-  catchError,
-  concatMap,
-  debounceTime,
-  distinctUntilChanged,
-  expand,
   map,
   startWith,
   switchMap,
-} from 'rxjs';
+  expand,
+  distinctUntilChanged,
+  debounceTime,
+  concatMap,
+  catchError,
+} from 'rxjs/operators';
+import { connect } from 'ngxtension/connect';
 
 export interface GifsState {
   gifs: Gif[];
@@ -45,24 +45,23 @@ export class RedditService {
   lastKnownGif = computed(() => this.state().lastKnownGif);
 
   //sources
-  pagination$ = new Subject<string | null>();
+  pagination$ = new Subject<void>();
   private error$ = new Subject<string | null>();
 
   private subredditChanged$ = this.subredditFormControl.valueChanges.pipe(
     debounceTime(300),
     distinctUntilChanged(),
-    startWith('gifs'),
-    map((subreddit) => (subreddit.length ? subreddit : 'gifs'))
+    startWith('gifs')
   );
 
   private gifsLoaded$ = this.subredditChanged$.pipe(
     switchMap((subreddit) =>
       this.pagination$.pipe(
-        startWith(null),
-        concatMap((lastKnownGif) => {
+        startWith(undefined),
+        concatMap(() => {
           return this.fetchFromReddit(
             subreddit,
-            lastKnownGif,
+            this.lastKnownGif(),
             this.gifsPerPage
           ).pipe(
             // A single request might not give us enough valid gifs for a
@@ -94,30 +93,25 @@ export class RedditService {
 
   constructor() {
     //reducers
-    this.subredditChanged$.pipe(takeUntilDestroyed()).subscribe(() => {
-      this.state.update((state) => ({
-        ...state,
-        loading: true,
-        gifs: [],
-        lastKnownGif: null,
-      }));
-    });
+    const nextState$ = merge(
+      this.subredditChanged$.pipe(
+        map(() => ({
+          loading: true,
+          gifs: [],
+          lastKnownGif: null,
+        }))
+      ),
+      this.error$.pipe(map((error) => ({ error })))
+    );
 
-    this.gifsLoaded$.pipe(takeUntilDestroyed()).subscribe((response) =>
-      this.state.update((state) => ({
+    connect(this.state)
+      .with(nextState$)
+      .with(this.gifsLoaded$, (state, response) => ({
         ...state,
         gifs: [...state.gifs, ...response.gifs],
         loading: false,
         lastKnownGif: response.lastKnownGif,
-      }))
-    );
-
-    this.error$.pipe(takeUntilDestroyed()).subscribe((error) =>
-      this.state.update((state) => ({
-        ...state,
-        error,
-      }))
-    );
+      }));
   }
 
   private fetchFromReddit(
@@ -137,13 +131,12 @@ export class RedditService {
         }),
         map((response) => {
           const posts = response.data.children;
-          let gifs = this.convertRedditPostsToGifs(posts);
-          let lastKnownGif = posts.length
+          const lastKnownGif = posts.length
             ? posts[posts.length - 1].data.name
             : null;
 
           return {
-            gifs,
+            gifs: this.convertRedditPostsToGifs(posts),
             gifsRequired,
             lastKnownGif,
           };
@@ -172,17 +165,13 @@ export class RedditService {
           ? `/assets/${thumbnail}.png`
           : thumbnail;
 
-        const validThumbnail =
-          modifiedThumbnail.endsWith('.jpg') ||
-          modifiedThumbnail.endsWith('.png');
-
         return {
           src: this.getBestSrcForGif(post),
           author: post.data.author,
           name: post.data.name,
           permalink: post.data.permalink,
           title: post.data.title,
-          thumbnail: validThumbnail ? modifiedThumbnail : `/assets/default.png`,
+          thumbnail: modifiedThumbnail,
           comments: post.data.num_comments,
         };
       })
