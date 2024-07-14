@@ -9,7 +9,13 @@ import { RedditService } from '../shared/data-access/reddit.service';
   template: `
     <app-gif-list [gifs]="redditService.gifs()" class="grid-container" />
   `,
-  styles: ``,
+  styles: [
+    `
+      mat-progress-spinner {
+        margin: 2rem auto;
+      }
+    `,
+  ],
 })
 export default class HomeComponent {
   redditService = inject(RedditService);
